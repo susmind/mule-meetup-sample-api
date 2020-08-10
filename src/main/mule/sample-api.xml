@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+	<configuration-properties doc:name="Configuration properties" doc:id="38826cf1-f9a9-4d54-a057-86ea631c9a04" file="properties\common.properties" />
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="b30df3f0-48ec-4710-a3a5-00b3bb222d7f" >
+		<http:listener-connection host="0.0.0.0" port="${http.port}" />
+	</http:listener-config>
+	 <api-gateway:autodiscovery apiId="16284808" doc:name="API Autodiscovery" doc:id="d1761209-f5ca-40d5-b523-173275ae4498" flowRef="api-main-flow" />
+	 <http:request-config name="Salesforce_HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="eecc3a49-1824-4726-93d4-915f26d6a38e" >
+		<http:request-connection host="ap16.salesforce.com" port="443" protocol="HTTPS"/>
+	</http:request-config>
+	<!-- <api-gateway:autodiscovery apiId="16294357" doc:name="API Autodiscovery" doc:id="8d6e5261-efec-40b9-8577-c81ab1ba26f8" flowRef="salesforce-requester-flow" /> -->
+	<flow name="api-main-flow" doc:id="b1cc46aa-6273-4daf-a936-962ddaf63a4c" >
+		<http:listener doc:name="Listener" doc:id="ee30f410-a928-4ff9-a9f0-e11eb0fe7182" config-ref="HTTP_Listener_config" path="/api/circuit-breaker">
+			<http:response statusCode="#[vars.http_status]" />
+			<http:error-response statusCode="#[vars.http_status]" >
+				<http:body ><![CDATA[#[payload]]]></http:body>
+			</http:error-response>
+		</http:listener>
+		<!-- <os:remove doc:name="Remove" doc:id="2a3d3eaf-717f-4bfd-b5de-014d55f94005" key="#['Circuit_Breaker_Profile']" objectStore="Circuit_Breaker_Object_Store"/>
+		 -->
+		<ee:transform doc:name="Transform Message" doc:id="b786aa2f-99ed-4ce5-b774-fc004db27864" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="originalAttributes" ><![CDATA[attributes]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<flow-ref doc:name="Execute Main Flow" doc:id="99080235-ed4f-4a7e-8a14-acf21cb9e7aa" name="api-function-main-flow" />
+		<error-handler >
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="d9bf385a-b3e7-4445-8645-3a28a1577f2d">
+				<logger level="INFO" doc:name="Logger" doc:id="ee0c2bab-a3ae-4da9-bdea-849dcdc1ed1d" message="#['API Error Occured']"/>
+			</on-error-propagate>
+		</error-handler>
+	</flow>
+	<sub-flow name="salesforce-requester-sub-flow" doc:id="05b4f007-a9db-4cd8-90f1-9c9b937ad72b" >
+	<http:request method="GET" doc:name="Fetch Salesforce Account" doc:id="79ee438c-445b-4ac0-ac8b-6f4a66a0cef1" config-ref="Salesforce_HTTP_Request_configuration" path="/services/data/v48.0/sobjects/Account/0012w00000Hz2FPAAZ">
+				</http:request>
+	</sub-flow>
+	<sub-flow name="api-function-main-flow" doc:id="cec8a533-7946-48bb-9e49-4ab9dd67c1ec" >
+		<logger level="INFO" doc:name="Flow Logic" doc:id="c9ad1dfc-b79d-47b1-a26d-e2dab55beecf" message="Main Logic Execution"/>
+		<set-variable value="#[vars.originalAttributes.queryParams['http_status'] as Number default 500]" doc:name="Response Code" doc:id="c6fc3318-e49d-4a39-ac5c-f42bdb618d03" variableName="http_status" />
+		<set-payload value="#[attributes.queryParams['http_response'] default 'Internal Server Error']" doc:name="Set Payload" doc:id="6b990a2e-e0c0-4390-9805-9373eaf52637" />
+		<choice doc:name="Choice" doc:id="ddc219a4-af32-43a4-8e78-4258fd36b5ca" >
+			<when expression="#[[200,201] contains vars.http_status]">
+				<logger level="INFO" doc:name="Logger" doc:id="57491383-4964-4ff1-9586-9ef5f8eb666a" message="No Error" />
+				<flow-ref doc:name="Call Salesforce Fetch Accounts Sub Flow" doc:id="6e1783ff-5c14-43a6-a3a2-e34a2b774ff2" name="salesforce-requester-sub-flow"/>
+			</when>
+			<otherwise>
+				<raise-error doc:name="Raise error" doc:id="ad7d8515-34a2-4a61-80a2-f39637e977b1" type="CUSTOM:MULE_ERROR" description="Custom Error" />
+			</otherwise>
+		</choice>
+	</sub-flow>
+</mule>
